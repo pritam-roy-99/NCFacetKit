@@ -1,0 +1,12 @@
+{
+  "preparations": 6,
+  "outcomes": [4, 4, 2],
+  "preparation_equivalences": [
+    "(P0 + P1)/2 = (P2 + P3)/2",
+    "(P0 + P1)/2 = (P4 + P5)/2"
+  ],
+  "measurement_equivalences": [
+    "M[0|2] = M[0|0] + M[1|0]",
+    "M[0|2] = M[2|1] + M[3|1]"
+  ]
+}

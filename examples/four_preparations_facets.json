@@ -1,0 +1,529 @@
+{
+  "metadata": {
+    "preparation_vertices": 4,
+    "measurement_vertices": 4,
+    "preparation_weight_vertices": 2,
+    "behavior_vertices": 28,
+    "affine_dimension": 6,
+    "independent_coordinates": [
+      "p(0|0,0)",
+      "p(0|1,0)",
+      "p(0|2,0)",
+      "p(0|0,1)",
+      "p(0|1,1)",
+      "p(0|2,1)"
+    ],
+    "preparation_equivalences": [
+      "(P0 + P1)/2 = (P2 + P3)/2"
+    ],
+    "measurement_equivalences": [],
+    "backend": "qhull-rationally-validated",
+    "completeness": "every candidate is an exact facet; numerical hull completeness not independently proven"
+  },
+  "facets": [
+    {
+      "coefficients": [
+        -1,
+        -1,
+        1,
+        0,
+        0,
+        0
+      ],
+      "bound": 0,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "-p(0|0,0) -p(0|1,0) +p(0|2,0) <= 0",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        -1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "bound": 0,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "-p(0|0,0) <= 0",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        -1,
+        0,
+        1,
+        0,
+        -1,
+        1
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "-p(0|0,0) +p(0|2,0) -p(0|1,1) +p(0|2,1) <= 1",
+      "tight_vertices": 8
+    },
+    {
+      "coefficients": [
+        -1,
+        0,
+        1,
+        0,
+        1,
+        -1
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "-p(0|0,0) +p(0|2,0) +p(0|1,1) -p(0|2,1) <= 1",
+      "tight_vertices": 8
+    },
+    {
+      "coefficients": [
+        0,
+        -1,
+        0,
+        0,
+        0,
+        0
+      ],
+      "bound": 0,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "-p(0|1,0) <= 0",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        0,
+        -1,
+        1,
+        -1,
+        0,
+        1
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "-p(0|1,0) +p(0|2,0) -p(0|0,1) +p(0|2,1) <= 1",
+      "tight_vertices": 8
+    },
+    {
+      "coefficients": [
+        0,
+        -1,
+        1,
+        1,
+        0,
+        -1
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "-p(0|1,0) +p(0|2,0) +p(0|0,1) -p(0|2,1) <= 1",
+      "tight_vertices": 8
+    },
+    {
+      "coefficients": [
+        0,
+        0,
+        -1,
+        0,
+        0,
+        0
+      ],
+      "bound": 0,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "-p(0|2,0) <= 0",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        0,
+        0,
+        0,
+        -1,
+        -1,
+        1
+      ],
+      "bound": 0,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "-p(0|0,1) -p(0|1,1) +p(0|2,1) <= 0",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        0,
+        0,
+        0,
+        -1,
+        0,
+        0
+      ],
+      "bound": 0,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "-p(0|0,1) <= 0",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        0,
+        0,
+        0,
+        0,
+        -1,
+        0
+      ],
+      "bound": 0,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "-p(0|1,1) <= 0",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        -1
+      ],
+      "bound": 0,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "-p(0|2,1) <= 0",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "p(0|2,1) <= 1",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        0
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "p(0|1,1) <= 1",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        0,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "p(0|0,1) <= 1",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        -1
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "p(0|0,1) +p(0|1,1) -p(0|2,1) <= 1",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        0,
+        0,
+        1,
+        0,
+        0,
+        0
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "p(0|2,0) <= 1",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        0,
+        1,
+        -1,
+        -1,
+        0,
+        1
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "p(0|1,0) -p(0|2,0) -p(0|0,1) +p(0|2,1) <= 1",
+      "tight_vertices": 8
+    },
+    {
+      "coefficients": [
+        0,
+        1,
+        -1,
+        1,
+        0,
+        -1
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "p(0|1,0) -p(0|2,0) +p(0|0,1) -p(0|2,1) <= 1",
+      "tight_vertices": 8
+    },
+    {
+      "coefficients": [
+        0,
+        1,
+        0,
+        0,
+        0,
+        0
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "p(0|1,0) <= 1",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        1,
+        0,
+        -1,
+        0,
+        -1,
+        1
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "p(0|0,0) -p(0|2,0) -p(0|1,1) +p(0|2,1) <= 1",
+      "tight_vertices": 8
+    },
+    {
+      "coefficients": [
+        1,
+        0,
+        -1,
+        0,
+        1,
+        -1
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "p(0|0,0) -p(0|2,0) +p(0|1,1) -p(0|2,1) <= 1",
+      "tight_vertices": 8
+    },
+    {
+      "coefficients": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "p(0|0,0) <= 1",
+      "tight_vertices": 14
+    },
+    {
+      "coefficients": [
+        1,
+        1,
+        -1,
+        0,
+        0,
+        0
+      ],
+      "bound": 1,
+      "coordinates": [
+        "p(0|0,0)",
+        "p(0|1,0)",
+        "p(0|2,0)",
+        "p(0|0,1)",
+        "p(0|1,1)",
+        "p(0|2,1)"
+      ],
+      "inequality": "p(0|0,0) +p(0|1,0) -p(0|2,0) <= 1",
+      "tight_vertices": 14
+    }
+  ]
+}
