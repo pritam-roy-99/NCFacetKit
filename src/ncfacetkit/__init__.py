@@ -5,4 +5,4 @@ from .behavior import MembershipResult, FractionResult
 
 __all__=['Scenario','Facet','FacetResult','ComplexityLimitExceeded',
          'BoundResult','MembershipResult','FractionResult']
-__version__='0.2.0'
+__version__='0.3.0'

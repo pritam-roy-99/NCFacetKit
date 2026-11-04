@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Iterable
 
 import numpy as np
-import sympy as sp
 from scipy.spatial import ConvexHull, QhullError
 
 
@@ -102,13 +101,107 @@ def _sides(statement: str):
     return tuple(_parse_linear(s) for s in parts)
 
 
+def _rref(rows, *, limit=None):
+    """Exact Gauss-Jordan row reduction; return echelon rows and pivot columns.
+
+    Stop once ``limit`` independent rows have been found. This is intentionally
+    specialized for small affine dimensions with many candidate rows: independent
+    rows are found incrementally rather than materializing a dense SymPy matrix.
+    """
+    basis = []
+    pivots = []
+    for source in rows:
+        row = [F(v) for v in source]
+        for pivot, vector in zip(pivots, basis):
+            coefficient = row[pivot]
+            if coefficient:
+                row = [a - coefficient*b for a,b in zip(row,vector)]
+        pivot = next((j for j,v in enumerate(row) if v), None)
+        if pivot is None:
+            continue
+        factor = row[pivot]
+        row = [v/factor for v in row]
+        # All earlier basis rows have zeros at their later pivot coordinates
+        # only after back elimination. For row-echelon form, the later pivot
+        # cannot precede an earlier one: eliminate without modifying the latter.
+        insert = next((k for k,q in enumerate(pivots) if q > pivot), len(pivots))
+        pivots.insert(insert,pivot)
+        basis.insert(insert,row)
+        for k, old in enumerate(basis):
+            if k == insert: continue
+            v = old[pivot]
+            if v:
+                basis[k] = [a - v*b for a,b in zip(old,row)]
+        if limit is not None and len(pivots) >= limit:
+            break
+    return basis, pivots
+
+
+def _rank(rows, *, limit=None):
+    return len(_rref(rows, limit=limit)[1])
+
+
 def _independent_rows(rows: list[list[F]], rhs: list[F]):
-    M=sp.Matrix([[sp.Rational(x.numerator,x.denominator) for x in row] for row in rows])
-    b=sp.Matrix([sp.Rational(x.numerator,x.denominator) for x in rhs])
-    if M.rows==0:return [],[]
-    if M.rank()!=M.row_join(b).rank():raise ValueError('Inconsistent operational-equivalence constraints')
-    pivot_rows=list(M.T.rref()[1])
-    return [rows[i] for i in pivot_rows],[rhs[i] for i in pivot_rows]
+    if len(rows) != len(rhs):
+        raise ValueError('Mismatch between equality rows and right-hand sides')
+    if not rows:
+        return [], []
+    original = []
+    # Find rank and independent ROW indices by sequential rank reduction.
+    augmented_pivots = []
+    augmented_basis = []
+    for i, (row0, b) in enumerate(zip(rows, rhs)):
+        row = [F(x) for x in row0] + [F(b)]
+        for pivot, vector in zip(augmented_pivots, augmented_basis):
+            factor = row[pivot]
+            if factor:
+                row = [a-factor*c for a,c in zip(row,vector)]
+        pivot = next((j for j,x in enumerate(row) if x),None)
+        if pivot is None: continue
+        if pivot == len(row)-1:
+            raise ValueError('Inconsistent operational-equivalence constraints')
+        factor = row[pivot]
+        row = [x/factor for x in row]
+        insert = next((j for j,v in enumerate(augmented_pivots) if v>pivot),len(augmented_pivots))
+        augmented_basis.insert(insert,row)
+        augmented_pivots.insert(insert,pivot)
+        for j,v in enumerate(augmented_basis):
+            if j!=insert and v[pivot]:
+                c=v[pivot]
+                augmented_basis[j]=[x-c*y for x,y in zip(v,row)]
+        original.append(i)
+    return [rows[i] for i in original], [rhs[i] for i in original]
+
+
+def _null_vector_codim_one(rows, columns):
+    """Exact one-dimensional right kernel of a full row rank (d x d+1) matrix."""
+    basis, pivots = _rref(rows, limit=columns-1)
+    if len(pivots) != columns - 1:
+        raise RuntimeError('Numerical facet candidate lacks exact affine rank. '
+                           'Use backend="cdd" for exact enumeration.')
+    free = next(i for i in range(columns) if i not in pivots)
+    result = [F(0)]*columns
+    result[free] = F(1)
+    for row, pivot in zip(basis, pivots):
+        result[pivot] = -row[free]
+    return tuple(result)
+
+
+def _integer_matrix(vectors):
+    """Common-denominator exact integer array, int64 when overflow-free."""
+    den = math.lcm(*(v.denominator for row in vectors for v in row))
+    data = [[int(v*den) for v in row] for row in vectors]
+    bound = max((abs(v) for row in data for v in row), default=0)
+    return np.asarray(data, dtype=np.int64 if bound < (1<<62) else object), den
+
+
+def _safe_integer_dot(matrix, normal):
+    """Exact dot product with overflow guard; object arrays for huge coefficients."""
+    high = max((abs(int(v)) for v in normal), default=0)
+    low = max((abs(int(v)) for v in matrix.flat), default=0)
+    if high*low*len(normal) >= (1<<62):
+        return np.asarray(matrix,dtype=object) @ np.asarray(normal,dtype=object)
+    return np.asarray(matrix,dtype=np.int64) @ np.asarray(normal,dtype=np.int64)
 
 
 def _fraction_solve(A:list[list[F]],b:list[F]):
@@ -340,6 +433,7 @@ class Scenario:
             raise ValueError('Preparation mixtures must have nonnegative coefficients')
         self._peqs.append((lhs*(F(1)/a),rhs*(F(1)/b),expression))
         if hasattr(self,'_cache'):self._cache.clear()
+        if hasattr(self,'_vertex_cache'):self._vertex_cache.clear()
         return self
 
     def measure(self,expression:str):
@@ -350,6 +444,7 @@ class Scenario:
             if y>=len(self.outcomes) or z>=self.outcomes[y]:raise ValueError('Measurement effect outside the scenario')
         self._meqs.append((lhs,rhs,expression))
         if hasattr(self,'_cache'):self._cache.clear()
+        if hasattr(self,'_vertex_cache'):self._vertex_cache.clear()
         return self
 
     def preparation_relation(self,left,right,label=None):
@@ -369,6 +464,7 @@ class Scenario:
         R=Linear({f'P{i}':v for i,v in enumerate(rhs) if v},F(0))
         self._peqs.append((L,R,label or f'coefficient vectors {left} = {right}'))
         if hasattr(self,'_cache'):self._cache.clear()
+        if hasattr(self,'_vertex_cache'):self._vertex_cache.clear()
         return self
 
     def effect_relation(self,coefficients,rhs=0,label=None):
@@ -382,6 +478,7 @@ class Scenario:
         self._meqs.append((Linear(c,F(0)),Linear.scalar(F(str(rhs))),
                            label or f'effect relation {coefficients} = {rhs}*I'))
         if hasattr(self,'_cache'):self._cache.clear()
+        if hasattr(self,'_vertex_cache'):self._vertex_cache.clear()
         return self
 
     def to_dict(self):
@@ -449,7 +546,15 @@ class Scenario:
         return prep,meas,weights
 
     def vertices(self,max_bases=200_000,max_products=400_000):
-        """Enumerate exact rational behavior vertices (potentially exponential)."""
+        """Enumerate normalized rational behaviors via integer matrix products.
+
+        A common integer denominator is used throughout; deduplication happens
+        on integer tuples, *before* allocating potentially thousands of Fractions.
+        """
+        cache_key=(max_bases,max_products)
+        if not hasattr(self,'_vertex_cache'):self._vertex_cache={}
+        if cache_key in self._vertex_cache:
+            return self._vertex_cache[cache_key]
         prep,meas,weights=self._component_vertices(max_bases)
         effects=self._measurement_matrix()[0]
         observable=[(x,y,z) for y,k in enumerate(self.outcomes) for z in range(k-1)
@@ -459,17 +564,33 @@ class Scenario:
         if expected>max_products:
             raise ComplexityLimitExceeded(f'{expected:,} behavior combinations exceed '
                                           f'max_products={max_products:,}.')
-        behaviors:dict[tuple[F,...],None]={}
-        for weight in weights:
-            support=[i for i,a in enumerate(weight) if a>0]
+        p,dp=_integer_matrix(prep)
+        m,dm=_integer_matrix(meas)
+        w,dw=_integer_matrix(weights)
+        denominator=dp*dm*dw
+        obs_x=np.asarray([x for x,y,z in observable],dtype=np.intp)
+        obs_e=np.asarray([effect_map[z,y] for x,y,z in observable],dtype=np.intp)
+        # Object dtype is necessary whenever intermediate products could
+        # overflow int64, even if the individual entries fit.
+        max_p=max((abs(int(v)) for v in p.flat),default=0)
+        max_m=max((abs(int(v)) for v in m.flat),default=0)
+        max_w=max((abs(int(v)) for v in w.flat),default=0)
+        if max_p*max_m*max_w*len(prep)>=(1<<62):
+            p=np.asarray(p,dtype=object)
+            m=np.asarray(m,dtype=object)
+            w=np.asarray(w,dtype=object)
+        unique={}
+        for wi,row in enumerate(weights):
+            support=[i for i,v in enumerate(row) if v>0]
+            coeff=w[wi,support,None]*p[support]
             for assigned in itertools.product(range(len(meas)),repeat=len(support)):
-                row=[]
-                for x,y,z in observable:
-                    j=effect_map[z,y]
-                    row.append(sum(weight[i]*prep[i][x]*meas[k][j]
-                                   for i,k in zip(support,assigned)))
-                behaviors[tuple(row)]=None
-        return prep,meas,weights,list(behaviors),observable
+                probability=coeff.T @ m[list(assigned)]
+                v=tuple(int(a) for a in probability[obs_x,obs_e])
+                unique[v]=None
+        behaviors=[tuple(F(num,denominator) for num in row) for row in unique]
+        answer=(prep,meas,weights,behaviors,observable)
+        self._vertex_cache[cache_key]=answer
+        return answer
 
     def facets(self,*,max_bases=200_000,max_products=400_000,max_hull_vertices=10_000,backend='auto'):
         """Generate all irredundant facet inequalities, with exact rational verification.
@@ -490,20 +611,23 @@ class Scenario:
         if len(behaviors)>max_hull_vertices:
             raise ComplexityLimitExceeded('Too many behavior vertices for convex-hull processing.')
         b0=behaviors[0]
-        D=sp.Matrix([[sp.Rational(x-y) for x,y in zip(b,b0)] for b in behaviors[1:]])
-        pivots=tuple(int(i) for i in D.rref()[1]) if D.rows else ()
+        # Exact pivot columns, determined without constructing a full SymPy matrix.
+        _, pivot_columns=_rref(([x-y for x,y in zip(b,b0)] for b in behaviors[1:]))
+        pivots=tuple(pivot_columns)
         d=len(pivots)
         names=tuple(f'p({z}|{x},{y})' for x,y,z in observables)
         chosen=tuple(names[i] for i in pivots)
-        if d==0: facets=[]
+        if d==0:
+            facets=[]
         else:
             coords=[tuple(b[i] for i in pivots) for b in behaviors]
+            integers,denominator=_integer_matrix(coords)
             if d==1:
-                mins=min(x[0] for x in coords); maxs=max(x[0] for x in coords)
+                mins=min(x[0] for x in coords);maxs=max(x[0] for x in coords)
                 raw=[_reduce_fraction_vector((F(-1),-mins)),
                      _reduce_fraction_vector((F(1),maxs))]
             else:
-                cnum=np.array([[float(v) for v in row] for row in coords])
+                cnum=np.asarray(coords,dtype=float)
                 use_cdd=(backend=='cdd')
                 if backend=='auto':
                     try:import cdd.gmp
@@ -517,44 +641,50 @@ class Scenario:
                     except QhullError as exc:
                         raise RuntimeError('Numerical hull failed. Try backend="cdd" with pycddlib installed.') from exc
                     raw=[]
+                    # Qhull triangulates non-simplicial faces, so hundreds of
+                    # simplices can describe one hyperplane. Coarse normal
+                    # grouping is only a fast prescreen; incidence signatures
+                    # are still checked before doing exact reconstruction.
                     seen_supports=set()
+                    grouped={}
                     for plane in hull.equations:
-                        # Numerical hull only *discovers* candidates. Every
-                        # candidate normal is reconstructed using rational
-                        # algebra and validated over all rational vertices.
-                        close=tuple(i for i,p in enumerate(cnum)
-                                    if abs(float(np.dot(plane[:-1],p)+plane[-1]))<1e-7)
-                        if close in seen_supports:continue
-                        seen_supports.add(close)
-                        matrix=sp.Matrix([[sp.Rational(coords[i][j]) for j in range(d)]+[1]
-                                          for i in close])
-                        pivrow=matrix.T.rref()[1]
-                        if len(pivrow)!=d:
-                            raise RuntimeError('Numerical facet candidate lacks exact affine rank. '
-                                               'Use backend="cdd" for an exact H-representation.')
-                        kernel=matrix[list(pivrow),:].nullspace()
-                        if len(kernel)!=1:
-                            raise RuntimeError('Failed exact reconstruction of a numerical facet candidate.')
-                        vals=tuple(F(int(v.p),int(v.q)) for v in kernel[0])
-                        ints=_reduce_fraction_vector(vals)
-                        normal=ints[:-1];const=ints[-1]
-                        evaluations=[sum(a*b for a,b in zip(normal,x))+const for x in coords]
-                        if max(evaluations)<=0:raw.append((*normal,-const))
-                        elif min(evaluations)>=0:raw.append((*(-a for a in normal),const))
-                        else:
-                            raise RuntimeError('Numerical facet not an exact supporting hyperplane. '
-                                               'Try backend="cdd".')
+                        key=tuple(np.round(plane,10))
+                        grouped.setdefault(key,[]).append(plane)
+                    for planes in grouped.values():
+                        for plane in planes[:1]:
+                            close=tuple(np.flatnonzero(
+                                np.abs(cnum @ plane[:-1]+plane[-1])<1e-7).tolist())
+                            if close in seen_supports:continue
+                            seen_supports.add(close)
+                            vals=_null_vector_codim_one(
+                                ([*coords[i],F(1)] for i in close),d+1)
+                            ints=_reduce_fraction_vector(vals)
+                            normal,const=ints[:-1],ints[-1]
+                            dot=_safe_integer_dot(integers,normal)
+                            maximum=max(int(v) for v in dot)
+                            minimum=min(int(v) for v in dot)
+                            if maximum+const*denominator<=0:
+                                raw.append((*normal,-const))
+                            elif minimum+const*denominator>=0:
+                                raw.append((*(-a for a in normal),const))
+                            else:
+                                raise RuntimeError('Numerical facet is not an exact supporting hyperplane. '
+                                                   'Try backend="cdd".')
             found={}
             for *n,bound in raw:
                 n=tuple(n)
-                dot=[sum(a*x for a,x in zip(n,p)) for p in coords]
-                if max(dot)!=bound:raise RuntimeError('A facet candidate failed exact equality validation.')
-                active=[x for x,v in zip(coords,dot) if v==bound]
+                dot=_safe_integer_dot(integers,n)
+                high=max(int(v) for v in dot)
+                if high!=bound*denominator:
+                    raise RuntimeError('A facet candidate failed exact equality validation.')
+                active_indices=[i for i,v in enumerate(dot) if int(v)==high]
                 if d>1:
-                    aff=sp.Matrix([[sp.Rational(v-w) for v,w in zip(x,active[0])]
-                                   for x in active[1:]])
-                    if aff.rank()!=d-1:raise RuntimeError('Facet candidate has incorrect face dimension.')
-                found[(*n,bound)]=len(active)
+                    reference=coords[active_indices[0]]
+                    vectors=([a-b for a,b in zip(coords[i],reference)]
+                             for i in active_indices[1:])
+                    if _rank(vectors,limit=d-1)!=d-1:
+                        raise RuntimeError('Facet candidate has incorrect face dimension.')
+                found[(*n,bound)]=len(active_indices)
             facets=[Facet(tuple(k[:-1]),int(k[-1]),chosen,t) for k,t in sorted(found.items())]
         engine=('cdd-exact' if d>1 and use_cdd else 'qhull-rationally-validated' if d>1
                 else 'exact-1d')
@@ -600,34 +730,37 @@ class Scenario:
         """Exact factorization for no preparation equivalences."""
         effects,rows,rhs=self._measurement_matrix()
         meas=_enumerate_standard_vertices(rows,rhs,max_bases,label='Measurement polytope')
-        delta=sp.Matrix([[sp.Rational(a-b) for a,b in zip(m,meas[0])]
-                         for m in meas[1:]])
-        pivots=tuple(delta.rref()[1]) if delta.rows else ()
+        _,pivots=_rref(([a-b for a,b in zip(m,meas[0])] for m in meas[1:]))
         d=len(pivots)
         names=tuple(f'p({effects[j][0]}|{x},{effects[j][1]})'
                     for x in range(self.preparations) for j in pivots)
         result_facets=[]
         if d:
-            basis=sp.Matrix([[1]+[sp.Rational(m[j]) for j in pivots] for m in meas])
-            independent_rows=list(basis.T.rref()[1])
-            inverse=basis[independent_rows,:].inv()
+            basis=[[F(1)]+[m[j] for j in pivots] for m in meas]
+            independent_rows=[]
+            # Find the rows that give an invertible (d+1) by (d+1) matrix.
+            current=[]
+            for k,row in enumerate(basis):
+                if _rank([*current,row])>len(current):
+                    current.append(row)
+                    independent_rows.append(k)
+                if len(current)==d+1:break
             for x in range(self.preparations):
                 for i,(z,y) in enumerate(effects):
-                    target=sp.Matrix([sp.Rational(meas[k][i]) for k in independent_rows])
-                    v=inverse*target
-                    if any((basis*v)[k]!=sp.Rational(meas[k][i]) for k in range(len(meas))):
+                    target=[meas[k][i] for k in independent_rows]
+                    solution=_fraction_solve(current,target)
+                    if solution is None or any(sum(a*b for a,b in zip(row,solution))!=m[i]
+                                               for row,m in zip(basis,meas)):
                         raise RuntimeError('Measurement coordinate reconstruction failed.')
                     tight=[m for m in meas if m[i]==0]
                     if not tight:continue
                     if d>1:
-                        active_diff=sp.Matrix([[sp.Rational(a-b) for a,b in zip(
-                                          (m[j] for j in pivots), (tight[0][j] for j in pivots))]
-                                          for m in tight[1:]])
-                        if active_diff.rank()!=d-1:continue
+                        reference=tight[0]
+                        if _rank(([a[j]-reference[j] for j in pivots] for a in tight[1:]),
+                                 limit=d-1)!=d-1:continue
                     normal=[F(0)]*(self.preparations*d)
-                    for k in range(d):normal[x*d+k]=-F(v[k+1])
-                    bound=F(v[0])
-                    prim=_reduce_fraction_vector([*normal,bound])
+                    for k in range(d):normal[x*d+k]=-solution[k+1]
+                    prim=_reduce_fraction_vector([*normal,solution[0]])
                     result_facets.append(Facet(tuple(prim[:-1]),prim[-1],names,
                                                len(tight)*len(meas)**(self.preparations-1)))
         result_facets=sorted(set(result_facets),key=lambda f:(f.coefficients,f.bound))

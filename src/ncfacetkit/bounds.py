@@ -9,9 +9,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from fractions import Fraction as F
-from typing import Optional
 
-from .core import Linear, _parse_linear, ComplexityLimitExceeded
+import numpy as np
+
+from .core import Linear, _parse_linear, _integer_matrix, ComplexityLimitExceeded
 
 
 @dataclass(frozen=True)
@@ -63,18 +64,32 @@ def noncontextual_bound(scenario,expression:str,*,max_bases:int=200_000) -> Boun
         _,z,x,y=label.split('_')
         terms.append((int(x),int(y),int(z),c))
     effect_index={(z,y):i for i,(z,y) in enumerate(scenario._measurement_matrix()[0])}
-    contrib=[]
-    choices=[]
-    for u in q:
-        scores=[]
-        for response in xi:
-            scores.append(sum(c*u[x]*response[effect_index[z,y]] for x,y,z,c in terms))
-        best=max(scores)
-        contrib.append(best)
-        choices.append(next(j for j,s in enumerate(scores) if s==best))
-    scores=[sum(wi*gi for wi,gi in zip(w,contrib)) for w in t]
-    optimum=max(scores)
-    position=scores.index(optimum)
+    # Build the score tensor in exact common-denominator integer arithmetic.
+    # For modest coefficients, NumPy int64 matrix multiplication provides the
+    # fast path; for large numerators the object backend avoids overflow.
+    p,dp=_integer_matrix(q)
+    m,dm=_integer_matrix(xi)
+    w,dw=_integer_matrix(t)
+    dc=__import__('math').lcm(*(c.denominator for _,_,_,c in terms)) if terms else 1
+    score_matrix=np.zeros((scenario.preparations,len(effect_index)),dtype=object)
+    for x,y,z,c in terms:
+        score_matrix[x,effect_index[z,y]]+=int(c*dc)
+    pa=max((abs(int(v)) for v in p.flat),default=0)
+    ma=max((abs(int(v)) for v in m.flat),default=0)
+    wa=max((abs(int(v)) for v in w.flat),default=0)
+    ca=max((abs(int(v)) for v in score_matrix.flat),default=0)
+    if pa*ma*ca*wa*max(1,scenario.preparations)*max(1,len(effect_index))*max(1,len(q))<(1<<62):
+        score_matrix=np.asarray(score_matrix,dtype=np.int64)
+    else:
+        p=np.asarray(p,dtype=object)
+        m=np.asarray(m,dtype=object)
+        w=np.asarray(w,dtype=object)
+    pair_scores=(p @ score_matrix) @ m.T
+    choices=[int(j) for j in np.argmax(pair_scores,axis=1)]
+    contrib=[int(pair_scores[i,j]) for i,j in enumerate(choices)]
+    totals=w @ np.asarray(contrib,dtype=w.dtype)
+    position=int(np.argmax(totals))
+    optimum=F(int(totals[position]),dp*dm*dc*dw)
     weights=t[position]
     probabilities={}
     for y,k in enumerate(scenario.outcomes):

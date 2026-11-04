@@ -4,18 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ncfacetkit"
-version = "0.2.0"
+version = "0.3.0"
 description = "Generalized noncontextual prepare-and-measure facets, inequalities, and contextual fraction"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "NCFacetKit contributors"}]
-dependencies = ["numpy>=1.23", "scipy>=1.9", "sympy>=1.11"]
+dependencies = ["numpy>=1.23", "scipy>=1.9"]
 keywords = ["generalized contextuality", "preparation noncontextuality", "facet enumeration", "quantum foundations"]
 
 [project.optional-dependencies]
 exact = ["pycddlib>=3.0"]
-dev = ["pytest>=8", "build>=1"]
+dev = ["pytest>=8", "build>=1", "ruff>=0.8", "pytest-cov>=6"]
 
 [project.scripts]
 nc-facets = "ncfacetkit.__main__:main"
