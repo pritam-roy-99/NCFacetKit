@@ -244,51 +244,190 @@ def _vertices_cdd(rows:list[list[F]],rhs:list[F]):
     return sorted(set(result))
 
 
+def _starting_basis(rows: list[list[F]], rhs: list[F]):
+    """Find a feasible basis with a floating-point LP, then certify it exactly.
+
+    The LP is a *basis discovery heuristic only*: no rounded LP coordinate
+    enters the result. An exact linear solve certifies the selected basis.
+    """
+    from scipy.optimize import linprog
+
+    n = len(rows[0])
+    r = len(rows)
+    if r == n:
+        candidate = tuple(range(n))
+        solution = _fraction_solve(rows, rhs)
+        if solution is not None and all(v >= 0 for v in solution):
+            return candidate
+        raise ValueError('The component polytope is infeasible.')
+
+    a = np.asarray([[float(v) for v in row] for row in rows])
+    b = np.asarray([float(v) for v in rhs])
+    # Distinct deterministic objectives help recover a certifiable basis when
+    # the first floating-point LP solution contains tiny numerical entries.
+    objectives = [np.zeros(n), np.arange(1, n+1, dtype=float),
+                  -np.arange(1, n+1, dtype=float)]
+    any_success = False
+    for objective in objectives:
+        result = linprog(objective, A_eq=a, b_eq=b,
+                         bounds=(0, None), method='highs')
+        if not result.success:
+            continue
+        any_success = True
+        order = sorted(range(n), key=lambda j: (-result.x[j], j))
+        selected = []
+        for col in order:
+            tentative = selected + [col]
+            if _rank(([row[j] for j in tentative] for row in rows)) == len(tentative):
+                selected.append(col)
+                if len(selected) == r:
+                    break
+        if len(selected) != r:
+            continue
+        selected.sort()
+        solution = _fraction_solve([[row[j] for j in selected] for row in rows], rhs)
+        if solution is not None and all(v >= 0 for v in solution):
+            return tuple(selected)
+    if not any_success:
+        raise ValueError('The component polytope is infeasible or numerically ill-conditioned.')
+
+    # Numerical LP supports can occasionally be ill-conditioned. This
+    # bounded fallback never becomes an unreported incomplete enumeration.
+    for i, basis in enumerate(itertools.combinations(range(n), r)):
+        if i >= 10_000:
+            break
+        solution = _fraction_solve([[row[j] for j in basis] for row in rows], rhs)
+        if solution is not None and all(v >= 0 for v in solution):
+            return basis
+    raise RuntimeError('Could not certify an initial feasible basis exactly. '
+                       'Use the GMP pycddlib backend for ill-conditioned input.')
+
+
+def _basis_tableau(rows: list[list[F]], rhs: list[F], basis: tuple[int, ...]):
+    """Return (B^-1 A, B^-1 b) in exact rational arithmetic."""
+    r, n = len(rows), len(rows[0])
+    work = [[*[row[j] for j in basis], *row, value]
+            for row, value in zip(rows, rhs)]
+    for i in range(r):
+        pivot = next((k for k in range(i, r) if work[k][i]), None)
+        if pivot is None:
+            raise RuntimeError('An attempted simplex basis is singular.')
+        work[i], work[pivot] = work[pivot], work[i]
+        factor = work[i][i]
+        work[i] = [v/factor for v in work[i]]
+        for k in range(r):
+            if k == i: continue
+            q = work[k][i]
+            if q:
+                work[k] = [v-q*u for v, u in zip(work[k], work[i])]
+    return tuple(tuple(row[r:r+n]) for row in work), tuple(row[-1] for row in work)
+
+
+def _pivot_vertices(rows: list[list[F]], rhs: list[F], max_bases: int,
+                    *, label: str):
+    """Exact feasible-basis graph traversal for {x>=0, Ax=b}.
+
+    A simplex pivot replaces one basic variable by one nonbasic variable.
+    All feasible exchanges are visited, *including zero-length/degenerate*
+    exchanges. The feasible basis graph is connected, so exhausting this
+    graph enumerates all vertices. Every returned vertex is verified exactly.
+    ``max_bases`` limits explored feasible bases, not n-choose-r candidates.
+    """
+    from collections import deque
+
+    n, r = len(rows[0]), len(rows)
+    if max_bases < 1:
+        raise ComplexityLimitExceeded(f'{label}: max_bases must be positive.')
+    initial = _starting_basis(rows, rhs)
+    tableau, values = _basis_tableau(rows, rhs, initial)
+    if any(v < 0 for v in values):
+        raise RuntimeError('The initial exact basis is not feasible.')
+    queue = deque([(initial, tableau, values)])
+    explored = {tuple(sorted(initial))}
+    vertices = set()
+    while queue:
+        basis, tableau, values = queue.popleft()
+        vertex = [F(0)]*n
+        for col, val in zip(basis, values):
+            vertex[col] = val
+        vertex = tuple(vertex)
+        if any(x < 0 for x in vertex) or any(
+            sum(a*x for a, x in zip(row, vertex)) != b
+            for row, b in zip(rows, rhs)
+        ):
+            raise RuntimeError('Exact simplex pivot failed primal feasibility.')
+        vertices.add(vertex)
+        nonbasic = [j for j in range(n) if j not in basis]
+        for entering in nonbasic:
+            for leaving in range(r):
+                pivot = tableau[leaving][entering]
+                if not pivot:
+                    continue
+                step = values[leaving]/pivot
+                if step < 0:
+                    continue
+                # Every zero-length degenerate basis exchange must be explored.
+                # For nonzero steps, the standard minimum-ratio feasibility
+                # test enforces nonnegativity of all remaining basic variables.
+                if any(values[k] - tableau[k][entering]*step < 0
+                       for k in range(r) if k != leaving):
+                    continue
+                next_basis = basis[:leaving] + (entering,) + basis[leaving+1:]
+                key = tuple(sorted(next_basis))
+                if key in explored:
+                    continue
+                if len(explored) >= max_bases:
+                    raise ComplexityLimitExceeded(
+                        f'{label}: feasible-basis graph exceeded max_bases={max_bases:,}. '
+                        'Increase the budget or use the exact cdd backend.')
+                # Gauss-Jordan pivot on B^-1 A, with the right-hand side.
+                newrow = tuple(v/pivot for v in tableau[leaving])
+                newvalue = values[leaving]/pivot
+                newtab = []
+                newvals = []
+                for k in range(r):
+                    if k == leaving:
+                        newtab.append(newrow)
+                        newvals.append(newvalue)
+                    else:
+                        scale = tableau[k][entering]
+                        newtab.append(tuple(v-scale*w for v, w in zip(tableau[k], newrow)))
+                        newvals.append(values[k]-scale*newvalue)
+                explored.add(key)
+                queue.append((next_basis, tuple(newtab), tuple(newvals)))
+    return sorted(vertices)
+
+
 def _enumerate_standard_vertices(rows: list[list[F]], rhs: list[F],
-                                 max_bases: int, *, label: str):
-    """Enumerate basic feasible solutions of {x>=0, Ax=b}; verify each exactly."""
-    rows,rhs=_independent_rows(rows,rhs)
-    if not rows: raise ValueError('A polytope requires at least one independent equality.')
-    n=len(rows[0]); r=len(rows)
-    if r>n:raise ValueError('More independent equalities than variables')
-    bases=math.comb(n,r)
-    if bases>max_bases:
-        raise ComplexityLimitExceeded(f'{label}: {bases:,} bases exceed max_bases={max_bases:,}. '
-                                      'Reduce the scenario or increase the budget.')
-    # Small enumeration is genuinely exact from beginning to end.
-    # For larger combinatorial basis counts, prefer exact GMP cddlib.
-    if bases>10_000:
-        try:import cdd.gmp
-        except ImportError:pass
-        else:return _vertices_cdd(rows,rhs)
-    exact=(bases<=10_000)
-    if not exact:
-        Am=np.array([[float(v) for v in row] for row in rows],dtype=float)
-        bm=np.array([float(x) for x in rhs],dtype=float)
-    unique: dict[tuple[F,...],None]={}
-    for idx in itertools.combinations(range(n),r):
-        if exact:
-            mat=[[row[i] for i in idx] for row in rows]
-            sol=_fraction_solve(mat,rhs)
-            if sol is None or any(v<0 for v in sol):continue
-            xf=sol
+                                 max_bases: int, *, label: str,
+                                 backend: str = 'auto'):
+    """Enumerate exact vertices of {x>=0, Ax=b} with pivoting or GMP cdd.
+
+    Unlike exhaustive n-choose-r subset scanning, pivoting walks only the
+    graph of feasible bases and never substitutes approximate coordinates.
+    """
+    rows, rhs = _independent_rows(rows, rhs)
+    if not rows:
+        raise ValueError('A polytope requires at least one independent equality.')
+    if len(rows) > len(rows[0]):
+        raise ValueError('More independent equalities than variables.')
+    if backend not in ('auto', 'pivot', 'cdd'):
+        raise ValueError('vertex backend must be auto, pivot or cdd.')
+    n, r = len(rows[0]), len(rows)
+    if backend == 'cdd':
+        try:
+            return _vertices_cdd(rows, rhs)
+        except ImportError as exc:
+            raise ImportError('GMP rational backend requires pycddlib: '
+                              'pip install "ncfacetkit[exact]"') from exc
+    if backend == 'auto' and math.comb(n, r) > 50_000:
+        try:
+            import cdd.gmp  # noqa: F401
+        except ImportError:
+            pass
         else:
-            A=Am[:,idx]
-            try:x=np.linalg.solve(A,bm)
-            except np.linalg.LinAlgError:continue
-            if min(x)<-1e-8 or np.max(np.abs(A@x-bm))>1e-7:continue
-            xf=tuple(F(float(t)).limit_denominator(1_000_000) for t in x)
-            if any(a<0 for a in xf):continue
-            if any(sum(row[i]*xf[j] for j,i in enumerate(idx))!=bb for row,bb in zip(rows,rhs)):
-                mat=[[row[i] for i in idx] for row in rows]
-                sol=_fraction_solve(mat,rhs)
-                if sol is None or any(v<0 for v in sol):continue
-                xf=sol
-        full=[F(0)]*n
-        for j,i in enumerate(idx):full[i]=xf[j]
-        unique[tuple(full)]=None
-    if not unique:raise ValueError(f'{label} has no feasible vertices. Check the equivalences.')
-    return list(unique)
+            return _vertices_cdd(rows, rhs)
+    return _pivot_vertices(rows, rhs, max_bases, label=label)
 
 
 def _reduce_fraction_vector(v):
@@ -408,7 +547,8 @@ class Scenario:
     measurements : int | None
       Required when outcomes is a single integer.
     """
-    def __init__(self,preparations:int,measurements:int|None=None,outcomes:int|list[int]=2):
+    def __init__(self,preparations:int,measurements:int|None=None,outcomes:int|list[int]=2, *,
+                 vertex_backend: str = 'auto'):
         if preparations<1:raise ValueError('preparations must be positive')
         if isinstance(outcomes,int):
             if measurements is None:raise ValueError('Specify measurements when outcomes is a single integer')
@@ -417,6 +557,9 @@ class Scenario:
             outs=list(outcomes)
             if measurements is not None and measurements!=len(outs):raise ValueError('Measurement/outcome counts disagree')
         if not outs or min(outs)<2:raise ValueError('Each measurement needs at least 2 outcomes')
+        if vertex_backend not in ('auto', 'pivot', 'cdd'):
+            raise ValueError('vertex_backend must be auto, pivot or cdd')
+        self.vertex_backend=vertex_backend
         self.preparations=preparations
         self.outcomes=outs
         self._peqs=[]
@@ -486,6 +629,7 @@ class Scenario:
         def encode(e):return {'terms':{k:str(v) for k,v in e.coefficients.items()},
                               'constant':str(e.constant)}
         return {'preparations':self.preparations,'outcomes':list(self.outcomes),
+                'vertex_backend':self.vertex_backend,
                 'preparation_relations':[{'lhs':encode(a),'rhs':encode(b),'label':lab}
                                         for a,b,lab in self._peqs],
                 'measurement_relations':[{'lhs':encode(a),'rhs':encode(b),'label':lab}
@@ -521,28 +665,26 @@ class Scenario:
         """Enumerate rational preparation, effect, and normalization-weight vertices."""
         if not hasattr(self,'_cache'):
             self._cache={}
-        if max_bases in self._cache:
-            return self._cache[max_bases]
+        key=(max_bases,self.vertex_backend)
+        if key in self._cache:
+            return self._cache[key]
         prows,pb=self._preparation_matrix()
-        prep=_enumerate_standard_vertices(prows,pb,max_bases,label='Preparation polytope')
+        prep=_enumerate_standard_vertices(prows,pb,max_bases,
+                                          label='Preparation polytope',backend=self.vertex_backend)
         effects,mrows,mb=self._measurement_matrix()
-        meas=_enumerate_standard_vertices(mrows,mb,max_bases,label='Measurement polytope')
+        meas=_enumerate_standard_vertices(mrows,mb,max_bases,
+                                          label='Measurement polytope',backend=self.vertex_backend)
         # The normalized sum of epistemic distributions induces a compact
         # weight polytope for q vertices. Grouping weights by q is exact.
         weights=_enumerate_standard_vertices([list(col) for col in zip(*prep)],
                                             [F(1)]*self.preparations,
-                                            max_bases,label='Normalization-weight polytope')
+                                            max_bases,label='Normalization-weight polytope',backend=self.vertex_backend)
+        # Both pivot traversal and GMP cdd enumerate the entire feasible
+        # component basis graph or fail explicitly at the complexity budget.
+        # No floating-point vertex coordinates enter these results.
         if not hasattr(self,'_cert_cache'):self._cert_cache={}
-        matrices=[(prows,pb),(mrows,mb),([list(c) for c in zip(*prep)],[F(1)]*self.preparations)]
-        basis_counts=[]
-        for rowset,bset in matrices:
-            indep,_=_independent_rows(rowset,bset)
-            basis_counts.append(math.comb(len(indep[0]),len(indep)))
-        try:import cdd.gmp
-        except ImportError:has_gmp=False
-        else:has_gmp=True
-        self._cert_cache[max_bases] = has_gmp or all(b<=10_000 for b in basis_counts)
-        self._cache[max_bases]=(prep,meas,weights)
+        self._cert_cache[key] = True
+        self._cache[key]=(prep,meas,weights)
         return prep,meas,weights
 
     def vertices(self,max_bases=200_000,max_products=400_000):
@@ -551,7 +693,7 @@ class Scenario:
         A common integer denominator is used throughout; deduplication happens
         on integer tuples, *before* allocating potentially thousands of Fractions.
         """
-        cache_key=(max_bases,max_products)
+        cache_key=(max_bases,max_products,self.vertex_backend)
         if not hasattr(self,'_vertex_cache'):self._vertex_cache={}
         if cache_key in self._vertex_cache:
             return self._vertex_cache[cache_key]
@@ -690,8 +832,6 @@ class Scenario:
                 else 'exact-1d')
         claim=('exact rational H-representation' if engine=='cdd-exact' or d<=1
                else 'every candidate is an exact facet; numerical hull completeness not independently proven')
-        if not self._cert_cache[max_bases]:
-            claim += '; component-vertex numerical prescreen is not completeness-certified'
         return FacetResult(facets,chosen,len(prep),len(meas),len(weights),len(behaviors),d,
                            [x[2] for x in self._peqs],[x[2] for x in self._meqs],engine,claim)
 
@@ -714,7 +854,8 @@ class Scenario:
                 'normalization_weight_vertices':len(weights),
                 'candidate_behavior_combinations':sum(len(meas)**sum(w>0 for w in t) for t in weights),
                 'factorized_unrestricted_preparations':not self._peqs,
-                'component_vertex_enumeration_certified':self._cert_cache[max_bases]}
+                'component_vertex_enumeration_certified':self._cert_cache[max_bases,self.vertex_backend],
+                'vertex_backend':self.vertex_backend}
 
     def is_noncontextual(self,data,*,tol=1e-8,max_bases=200_000):
         """Numerical LP membership for a normalized conditional probability table."""
@@ -729,7 +870,8 @@ class Scenario:
     def _unrestricted_facets(self,*,max_bases=200_000):
         """Exact factorization for no preparation equivalences."""
         effects,rows,rhs=self._measurement_matrix()
-        meas=_enumerate_standard_vertices(rows,rhs,max_bases,label='Measurement polytope')
+        meas=_enumerate_standard_vertices(rows,rhs,max_bases,label='Measurement polytope',
+                                          backend=self.vertex_backend)
         _,pivots=_rref(([a-b for a,b in zip(m,meas[0])] for m in meas[1:]))
         d=len(pivots)
         names=tuple(f'p({effects[j][0]}|{x},{effects[j][1]})'
@@ -764,18 +906,11 @@ class Scenario:
                     result_facets.append(Facet(tuple(prim[:-1]),prim[-1],names,
                                                len(tight)*len(meas)**(self.preparations-1)))
         result_facets=sorted(set(result_facets),key=lambda f:(f.coefficients,f.bound))
-        independent,_=_independent_rows(rows,rhs)
-        bases=math.comb(len(rows[0]),len(independent))
-        try:import cdd.gmp
-        except ImportError:has_gmp=False
-        else:has_gmp=True
-        certified=has_gmp or bases<=10_000
-        statement=('exact: product of independently selectable measurement response polytopes'
-                   if certified else 'analytic product factorization; component vertices only numerically prescreened')
+        statement='exact: product of independently selectable measurement response polytopes'
         return FacetResult(result_facets,names,self.preparations,len(meas),1,
                            len(meas)**self.preparations,self.preparations*d,
                            [],[e[2] for e in self._meqs],
-                           'exact-product-factorization' if certified else 'product-factorization-rational-checks',statement)
+                           'exact-product-factorization',statement)
 
     def orbits(self,result:FacetResult,*,max_relabelings=5000):
         """Return all inequivalent facet classes when exhaustive relabeling is tractable."""
@@ -784,7 +919,8 @@ class Scenario:
 
     @classmethod
     def from_dict(cls,config:dict):
-        obj=cls(config['preparations'],config.get('measurements'),config.get('outcomes',2))
+        obj=cls(config['preparations'],config.get('measurements'),config.get('outcomes',2),
+                vertex_backend=config.get('vertex_backend','auto'))
         for eq in config.get('preparation_equivalences',[]):obj.prepare(eq)
         for eq in config.get('measurement_equivalences',[]):obj.measure(eq)
         def decode(d):return Linear({k:F(v) for k,v in d['terms'].items()},F(d.get('constant','0')))

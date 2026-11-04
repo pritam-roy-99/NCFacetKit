@@ -8,3 +8,6 @@
 - **Certification grades are surfaced.** Default high-dimensional facets use numerical discovery with rational validation. For a complete exact polyhedral conversion, use `cdd.gmp` and ensure that component vertices were also enumerated exactly. In large cases the optional exact backend can still run out of resources.
 - **Contextual fraction is a numerical LP output.** Inspect the returned status and residual. It is defined relative to the full operational behavior polytope satisfying declared linear identities, not relative to an arbitrarily selected noise model.
 - **Relabeling orbits are exhaustive only within the finite search budget.** The method raises rather than returning partial classes under the label of complete symmetry reduction.
+
+- **Feasible-basis graph traversal:** exact rational pivots enumerate all vertices only if the traversal terminates. Highly degenerate polytopes can have many feasible bases representing the same vertex; if `max_bases` is exceeded, the solver raises, with no partial result mislabelled as complete. The initial numerical LP proposes a basis only; a failed exact basis certification raises rather than silently trusting a rounded solution.
+- **Exact cdd facet test:** the optional `cdd.gmp` comparison test is skipped unless pycddlib is installed. The core tests do not alone verify the binary GMP setup on every deployment.

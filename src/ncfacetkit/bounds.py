@@ -100,7 +100,7 @@ def noncontextual_bound(scenario,expression:str,*,max_bases:int=200_000) -> Boun
                 probabilities[f'p({z}|{x},{y})']=val
     selected=tuple(choices[i] if weights[i] else None for i in range(len(q)))
     status=('exact rational optimum over exhaustively enumerated component vertices'
-            if scenario._cert_cache[max_bases] else
+            if scenario._cert_cache[max_bases,scenario.vertex_backend] else
             'rational optimum over enumerated vertices; global completeness NOT certified')
     return BoundResult(optimum+score.constant,expression,weights,selected,probabilities,
                        'convex mixture of q-vertices and response-vertices',status)
