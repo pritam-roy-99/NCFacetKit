@@ -32,14 +32,16 @@ jobs:
           python -m pip install -e ".[dev]"
           python -m pytest -q
 
-      - name: Commit full package to main
+      - name: Commit tested sources without restricted workflow file
         shell: bash
         run: |
           set -euo pipefail
+          rm -f .github/workflows/tests.yml
+          rm -rf .upload
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           if ! git diff --cached --quiet; then
-            git commit -m "Publish tested NCFacetKit v0.2.0 source and tests"
+            git commit -m "Publish tested NCFacetKit v0.2.0 source and examples"
             git push origin HEAD:main
           fi
